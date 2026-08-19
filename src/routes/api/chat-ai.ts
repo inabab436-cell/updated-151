@@ -67,12 +67,14 @@ const corsHeaders = {
 };
 
 interface RequestBody {
-  action?: "start" | "fetch" | "send";
+  action?: "start" | "fetch" | "send" | "location_update";
   conversation_id?: string;
   merchant_id?: string;
   visitor_id?: string;
   message?: string;
   attachments?: unknown;
+  /** Live-location coordinate refresh (action: "location_update"). */
+  location?: unknown;
 }
 
 interface MessageRow {
