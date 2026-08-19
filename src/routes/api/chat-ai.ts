@@ -480,13 +480,8 @@ export function buildSystemPrompt(inventoryText?: string): string {
   return buildAgentPrompt(inventoryText);
 }
 
-/**
- * Legacy marker kept only so older transcripts/prompt wording remain
- * understandable. Nothing produces it anymore: recalled agent replies are
- * now tagged structurally (by role) instead of being keyword-redacted.
- */
-export const RECALL_REDACTION_MARKER =
-  "[Store details removed — use the fresh snapshot]";
+
+
 
 /**
  * Builds the recall transcript.
