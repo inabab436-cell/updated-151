@@ -582,6 +582,58 @@ function ChatPage() {
               {uploadErr}
             </div>
           )}
+          {locErr && (
+            <div className="mb-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {locErr}
+            </div>
+          )}
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              onClick={() => void shareLocation(false)}
+              disabled={disabled || locBusy || liveSharing}
+            >
+              {locBusy && !liveSharing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <MapPin className="h-4 w-4" />
+              )}
+              إرسال موقعي الحالي
+            </Button>
+            {liveSharing ? (
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                className="gap-1"
+                onClick={() => void stopLiveSharing()}
+              >
+                <Square className="h-4 w-4" />
+                إيقاف المشاركة الحية
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="gap-1"
+                onClick={() => void startLiveSharing()}
+                disabled={disabled || locBusy}
+              >
+                <Radio className="h-4 w-4" />
+                مشاركة الموقع الحي
+              </Button>
+            )}
+            {liveSharing && (
+              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
+                جاري تحديث موقعك تلقائياً
+              </span>
+            )}
+          </div>
           <div className="flex items-end gap-2">
             <input
               ref={fileInputRef}
