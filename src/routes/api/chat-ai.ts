@@ -10,6 +10,12 @@ import {
   buildAttachmentContextMessage,
   needsAttachmentAwareRegeneration,
 } from "@/lib/reply-attachment-context";
+import {
+  describeLocationsForModel,
+  isLocationAttachment,
+  sanitizeLocationAttachment,
+  type LocationAttachment,
+} from "@/lib/chat-location";
 
 
 
