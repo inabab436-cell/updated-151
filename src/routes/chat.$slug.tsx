@@ -702,7 +702,11 @@ function MessageBubble({
 }) {
   const isUser = role === "user";
   const theme = BUBBLE_THEME;
-  const media = (attachments ?? []).filter((a) => a && typeof a.url === "string");
+  const all = (attachments ?? []).filter((a) => a && typeof a.url === "string");
+  const locations = all.filter(
+    (a) => a.kind === "location" && typeof a.lat === "number" && typeof a.lng === "number",
+  ) as LocationAttachment[];
+  const media = all.filter((a) => a.kind !== "location");
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div className={`flex max-w-[85%] items-start gap-2 ${isUser ? "flex-row-reverse" : ""}`}>
