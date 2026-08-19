@@ -987,6 +987,11 @@ export const Route = createFileRoute("/api/chat-ai")({
           for (const a of rawAttachments.slice(0, 4)) {
             if (!a || typeof a !== "object") continue;
             const o = a as Record<string, unknown>;
+            if (o.kind === "location") {
+              const loc = sanitizeLocationAttachment(o);
+              if (loc) customerAttachments.push(loc as unknown as Record<string, unknown>);
+              continue;
+            }
             const url = typeof o.url === "string" ? o.url : "";
             if (!/^https?:\/\//i.test(url)) continue;
             customerAttachments.push({
