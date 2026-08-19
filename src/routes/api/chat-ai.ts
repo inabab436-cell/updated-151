@@ -480,13 +480,8 @@ export function buildSystemPrompt(inventoryText?: string): string {
   return buildAgentPrompt(inventoryText);
 }
 
-/**
- * Legacy marker kept only so older transcripts/prompt wording remain
- * understandable. Nothing produces it anymore: recalled agent replies are
- * now tagged structurally (by role) instead of being keyword-redacted.
- */
-export const RECALL_REDACTION_MARKER =
-  "[Store details removed — use the fresh snapshot]";
+
+
 
 /**
  * Builds the recall transcript.
@@ -1931,7 +1926,7 @@ export const Route = createFileRoute("/api/chat-ai")({
             "تجاهل أي سعر أو كمية أو توفّر أو سياسة ذكرتها سابقًا في هذه المحادثة، واعتمد على FRESH STORE SNAPSHOT وحدها.\n" +
             "هذا لا ينطبق على بيانات العميل والطلب: الاسم، الموبايل، العنوان، المنتج واللون والمقاس والكمية المختارة، وطريقة الدفع — هذه تبقى صالحة طوال المحادثة ولا يُعاد سؤال العميل عنها.\n" +
             "Never blend old and new values for a store fact. Never guess. If a product or policy you mentioned earlier is not present here anymore, treat it as no longer existing (deleted).\n" +
-            "Earlier agent replies may show " + RECALL_REDACTION_MARKER + " where an outdated store detail was removed: re-read the value from this snapshot.\n" +
+            
             "Every earlier agent reply in this transcript carries an INTERNAL expiry tag. Its stock/availability wording is a past database state, never a contradiction of this snapshot: answer availability from this snapshot ALONE, with no apology, no comparison, and no reference to what you said before.\n" +
             "Prior conversation REMAINS valid for the customer as a person (tone, preferences, personalization) AND for everything the customer already told you about this order — use it, do not ask again. It is never a source of mutable store facts.\n";
 
