@@ -732,6 +732,33 @@ function MessageBubble({
               ))}
             </div>
           )}
+          {locations.map((a, i) => {
+            const live = isLiveLocationActive(a);
+            return (
+              <a
+                key={`loc-${i}`}
+                href={mapsUrl(a.lat, a.lng)}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-2 rounded-xl border border-border/50 bg-background/60 px-3 py-2 text-foreground no-underline"
+              >
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-muted">
+                  {live ? (
+                    <Radio className="h-4 w-4 animate-pulse text-emerald-600" />
+                  ) : (
+                    <MapPin className="h-4 w-4" />
+                  )}
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-xs font-semibold">{formatLocationSummary(a)}</span>
+                  <span className="block text-[11px] text-muted-foreground">
+                    فتح في الخرائط
+                    {a.accuracy != null ? ` · دقة ±${a.accuracy}م` : ""}
+                  </span>
+                </span>
+              </a>
+            );
+          })}
           {content && <div>{content}</div>}
         </div>
       </div>
