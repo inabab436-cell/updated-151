@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
   Send, ArrowRight, User2, Bot, UserCircle2, Paperclip, X, Loader2,
+  MapPin, Radio, Square,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { getStorefront } from "@/lib/storefront.functions";
 import { getChatConfig } from "@/lib/chat-config.functions";
 import { uploadChatImage } from "@/lib/chat-upload.functions";
+import {
+  LIVE_LOCATION_DURATION_MS,
+  LIVE_LOCATION_UPDATE_MS,
+  formatLocationSummary,
+  isLiveLocationActive,
+  mapsUrl,
+  type LocationAttachment,
+} from "@/lib/chat-location";
 import {
   CustomerLoginPanel,
   useCustomerSession,
@@ -35,6 +44,13 @@ type ChatAttachment = {
   mime?: string | null;
   name?: string | null;
   source?: string | null;
+  lat?: number;
+  lng?: number;
+  accuracy?: number | null;
+  label?: string | null;
+  live?: boolean;
+  updated_at?: string | null;
+  expires_at?: string | null;
 };
 
 type ChatMessage = {
@@ -44,6 +60,24 @@ type ChatMessage = {
   created_at?: string;
   attachments?: ChatAttachment[] | null;
 };
+
+function getCurrentPosition(): Promise<GeolocationPosition> {
+  return new Promise((resolve, reject) => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      reject(new Error("المتصفح لا يدعم تحديد الموقع."));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(resolve, (err) => {
+      reject(
+        new Error(
+          err.code === err.PERMISSION_DENIED
+            ? "تم رفض إذن الوصول للموقع. فعّله من إعدادات المتصفح."
+            : "تعذر تحديد موقعك الآن، حاول مرة أخرى.",
+        ),
+      );
+    }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+  });
+}
 
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 
