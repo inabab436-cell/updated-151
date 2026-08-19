@@ -547,10 +547,19 @@ export function buildHistoryForModel<
   const rows = history ?? [];
   const cutoff = Math.max(0, rows.length - keepIntact);
   let remainingImageInputs = MAX_HISTORY_IMAGE_INPUTS;
+  // The freshest shared location is the one the agent must act on; older ones
+  // are context only.
+  let lastLocationIndex = -1;
+  rows.forEach((m, i) => {
+    const list = Array.isArray(m.attachments) ? (m.attachments as any[]) : [];
+    if (list.some(isLocationAttachment)) lastLocationIndex = i;
+  });
   return rows.map((m, i) => {
     const role = m.role === "assistant" ? ("assistant" as const) : ("user" as const);
     let content = String(m.content ?? "");
     const atts = Array.isArray(m.attachments) ? (m.attachments as any[]) : [];
+    const locationHint = describeLocationsForModel(atts, { isLatest: i === lastLocationIndex });
+    if (locationHint) content = content ? `${content}\n\n${locationHint}` : locationHint;
     const imageUrls = atts.map(getAttachmentImageUrl).filter((url): url is string => Boolean(url));
 
     if (role === "user" && imageUrls.length > 0 && i >= cutoff && remainingImageInputs > 0) {
