@@ -879,6 +879,56 @@ export const Route = createFileRoute("/api/chat-ai")({
             return data ?? [];
           };
 
+          // Live location refresh: moves the coordinates of the customer's
+          // active live-location attachment in place, so a live share is ONE
+          // message that keeps updating instead of a flood of new messages.
+          // It never triggers an agent run.
+          if (action === "location_update") {
+            if (!conversation_id) {
+              return respond({ error: "conversation_id required" }, 400);
+            }
+            const loc = sanitizeLocationAttachment(body.location);
+            if (!loc) return respond({ error: "valid location required" }, 400);
+            const { data: recent } = await supabase
+              .from("messages")
+              .select("id, attachments")
+              .eq("conversation_id", conversation_id)
+              .eq("role", "user")
+              .order("created_at", { ascending: false })
+              .limit(10);
+            const target = (recent ?? []).find(
+              (r: any) =>
+                Array.isArray(r.attachments) &&
+                r.attachments.some((a: any) => isLocationAttachment(a) && a.live),
+            );
+            if (!target) {
+              return respond({ conversation_id, updated: false });
+            }
+            const nextAttachments = (target.attachments as any[]).map((a) =>
+              isLocationAttachment(a) && a.live
+                ? ({
+                    ...a,
+                    lat: loc.lat,
+                    lng: loc.lng,
+                    url: loc.url,
+                    accuracy: loc.accuracy,
+                    updated_at: loc.updated_at,
+                    live: loc.live,
+                    expires_at: (a as LocationAttachment).expires_at ?? loc.expires_at,
+                  } satisfies LocationAttachment)
+                : a,
+            );
+            await supabase
+              .from("messages")
+              .update({ attachments: nextAttachments })
+              .eq("id", target.id);
+            return respond({
+              conversation_id,
+              updated: true,
+              messages: await loadMessages(conversation_id),
+            });
+          }
+
 
           if (action === "start") {
             if (!merchant_id || !visitor_id) {
