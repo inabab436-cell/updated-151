@@ -10,6 +10,12 @@ import {
   buildAttachmentContextMessage,
   needsAttachmentAwareRegeneration,
 } from "@/lib/reply-attachment-context";
+import {
+  describeLocationsForModel,
+  isLocationAttachment,
+  sanitizeLocationAttachment,
+  type LocationAttachment,
+} from "@/lib/chat-location";
 
 
 
@@ -61,12 +67,14 @@ const corsHeaders = {
 };
 
 interface RequestBody {
-  action?: "start" | "fetch" | "send";
+  action?: "start" | "fetch" | "send" | "location_update";
   conversation_id?: string;
   merchant_id?: string;
   visitor_id?: string;
   message?: string;
   attachments?: unknown;
+  /** Live-location coordinate refresh (action: "location_update"). */
+  location?: unknown;
 }
 
 interface MessageRow {
@@ -547,10 +555,19 @@ export function buildHistoryForModel<
   const rows = history ?? [];
   const cutoff = Math.max(0, rows.length - keepIntact);
   let remainingImageInputs = MAX_HISTORY_IMAGE_INPUTS;
+  // The freshest shared location is the one the agent must act on; older ones
+  // are context only.
+  let lastLocationIndex = -1;
+  rows.forEach((m, i) => {
+    const list = Array.isArray(m.attachments) ? (m.attachments as any[]) : [];
+    if (list.some(isLocationAttachment)) lastLocationIndex = i;
+  });
   return rows.map((m, i) => {
     const role = m.role === "assistant" ? ("assistant" as const) : ("user" as const);
     let content = String(m.content ?? "");
     const atts = Array.isArray(m.attachments) ? (m.attachments as any[]) : [];
+    const locationHint = describeLocationsForModel(atts, { isLatest: i === lastLocationIndex });
+    if (locationHint) content = content ? `${content}\n\n${locationHint}` : locationHint;
     const imageUrls = atts.map(getAttachmentImageUrl).filter((url): url is string => Boolean(url));
 
     if (role === "user" && imageUrls.length > 0 && i >= cutoff && remainingImageInputs > 0) {
@@ -862,6 +879,56 @@ export const Route = createFileRoute("/api/chat-ai")({
             return data ?? [];
           };
 
+          // Live location refresh: moves the coordinates of the customer's
+          // active live-location attachment in place, so a live share is ONE
+          // message that keeps updating instead of a flood of new messages.
+          // It never triggers an agent run.
+          if (action === "location_update") {
+            if (!conversation_id) {
+              return respond({ error: "conversation_id required" }, 400);
+            }
+            const loc = sanitizeLocationAttachment(body.location);
+            if (!loc) return respond({ error: "valid location required" }, 400);
+            const { data: recent } = await supabase
+              .from("messages")
+              .select("id, attachments")
+              .eq("conversation_id", conversation_id)
+              .eq("role", "user")
+              .order("created_at", { ascending: false })
+              .limit(10);
+            const target = (recent ?? []).find(
+              (r: any) =>
+                Array.isArray(r.attachments) &&
+                r.attachments.some((a: any) => isLocationAttachment(a) && a.live),
+            );
+            if (!target) {
+              return respond({ conversation_id, updated: false });
+            }
+            const nextAttachments = (target.attachments as any[]).map((a) =>
+              isLocationAttachment(a) && a.live
+                ? ({
+                    ...a,
+                    lat: loc.lat,
+                    lng: loc.lng,
+                    url: loc.url,
+                    accuracy: loc.accuracy,
+                    updated_at: loc.updated_at,
+                    live: loc.live,
+                    expires_at: (a as LocationAttachment).expires_at ?? loc.expires_at,
+                  } satisfies LocationAttachment)
+                : a,
+            );
+            await supabase
+              .from("messages")
+              .update({ attachments: nextAttachments })
+              .eq("id", target.id);
+            return respond({
+              conversation_id,
+              updated: true,
+              messages: await loadMessages(conversation_id),
+            });
+          }
+
 
           if (action === "start") {
             if (!merchant_id || !visitor_id) {
@@ -972,6 +1039,11 @@ export const Route = createFileRoute("/api/chat-ai")({
           for (const a of rawAttachments.slice(0, 4)) {
             if (!a || typeof a !== "object") continue;
             const o = a as Record<string, unknown>;
+            if (o.kind === "location") {
+              const loc = sanitizeLocationAttachment(o);
+              if (loc) customerAttachments.push(loc as unknown as Record<string, unknown>);
+              continue;
+            }
             const url = typeof o.url === "string" ? o.url : "";
             if (!/^https?:\/\//i.test(url)) continue;
             customerAttachments.push({

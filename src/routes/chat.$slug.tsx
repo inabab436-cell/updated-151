@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
   Send, ArrowRight, User2, Bot, UserCircle2, Paperclip, X, Loader2,
+  MapPin, Radio, Square,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { getStorefront } from "@/lib/storefront.functions";
 import { getChatConfig } from "@/lib/chat-config.functions";
 import { uploadChatImage } from "@/lib/chat-upload.functions";
+import {
+  LIVE_LOCATION_DURATION_MS,
+  LIVE_LOCATION_UPDATE_MS,
+  formatLocationSummary,
+  isLiveLocationActive,
+  mapsUrl,
+  type LocationAttachment,
+} from "@/lib/chat-location";
 import {
   CustomerLoginPanel,
   useCustomerSession,
@@ -35,6 +44,13 @@ type ChatAttachment = {
   mime?: string | null;
   name?: string | null;
   source?: string | null;
+  lat?: number;
+  lng?: number;
+  accuracy?: number | null;
+  label?: string | null;
+  live?: boolean;
+  updated_at?: string | null;
+  expires_at?: string | null;
 };
 
 type ChatMessage = {
@@ -44,6 +60,24 @@ type ChatMessage = {
   created_at?: string;
   attachments?: ChatAttachment[] | null;
 };
+
+function getCurrentPosition(): Promise<GeolocationPosition> {
+  return new Promise((resolve, reject) => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      reject(new Error("المتصفح لا يدعم تحديد الموقع."));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(resolve, (err) => {
+      reject(
+        new Error(
+          err.code === err.PERMISSION_DENIED
+            ? "تم رفض إذن الوصول للموقع. فعّله من إعدادات المتصفح."
+            : "تعذر تحديد موقعك الآن، حاول مرة أخرى.",
+        ),
+      );
+    }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+  });
+}
 
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 
@@ -132,6 +166,14 @@ function ChatPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadErr, setUploadErr] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // ---- Live location sharing -------------------------------------------
+  const [locBusy, setLocBusy] = useState(false);
+  const [locErr, setLocErr] = useState<string | null>(null);
+  const [liveSharing, setLiveSharing] = useState(false);
+  const watchIdRef = useRef<number | null>(null);
+  const liveStopRef = useRef<number | null>(null);
+  const lastPushRef = useRef(0);
 
   const [initErr, setInitErr] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -299,6 +341,130 @@ function ChatPage() {
     }
   }
 
+  /** Sends one location message (one-shot or the opening point of a live share). */
+  const shareLocation = useCallback(
+    async (live: boolean) => {
+      if (!callEdge || !visitorId || !merchantId) return null;
+      setLocErr(null);
+      setLocBusy(true);
+      try {
+        const pos = await getCurrentPosition();
+        const now = new Date();
+        const attachment: LocationAttachment = {
+          kind: "location",
+          url: mapsUrl(pos.coords.latitude, pos.coords.longitude),
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy != null ? Math.round(pos.coords.accuracy) : null,
+          label: null,
+          live,
+          updated_at: now.toISOString(),
+          expires_at: live ? new Date(now.getTime() + LIVE_LOCATION_DURATION_MS).toISOString() : null,
+          source: "customer",
+        };
+        const text = live ? "بدأت مشاركة موقعي الحي معك." : "ده موقعي الحالي.";
+        setMessages((m) => [...m, {
+          role: "user",
+          content: text,
+          created_at: now.toISOString(),
+          attachments: [attachment as ChatAttachment],
+        }]);
+        const r = await callEdge({
+          action: "send",
+          conversation_id: conversationId ?? undefined,
+          merchant_id: merchantId,
+          visitor_id: visitorId,
+          message: text,
+          attachments: [attachment],
+        });
+        if (r.conversation_id && r.conversation_id !== conversationId) {
+          setConversationId(r.conversation_id);
+        }
+        if (r.messages) setMessages(r.messages);
+        setNeedsHuman(!!r.needs_human);
+        return r.conversation_id ?? conversationId;
+      } catch (e: any) {
+        setLocErr(e?.message || "تعذر مشاركة الموقع.");
+        return null;
+      } finally {
+        setLocBusy(false);
+      }
+    },
+    [callEdge, conversationId, merchantId, visitorId],
+  );
+
+  const stopLiveSharing = useCallback(
+    async (convId?: string | null) => {
+      if (watchIdRef.current != null && typeof navigator !== "undefined") {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+      if (liveStopRef.current != null) {
+        window.clearTimeout(liveStopRef.current);
+        liveStopRef.current = null;
+      }
+      setLiveSharing(false);
+      const id = convId ?? conversationId;
+      if (!callEdge || !id) return;
+      try {
+        const pos = await getCurrentPosition();
+        await callEdge({
+          action: "location_update",
+          conversation_id: id,
+          location: {
+            kind: "location",
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+            live: false,
+            updated_at: new Date().toISOString(),
+          },
+        });
+      } catch { /* stopping must never surface an error */ }
+    },
+    [callEdge, conversationId],
+  );
+
+  const startLiveSharing = useCallback(async () => {
+    const convId = await shareLocation(true);
+    if (!convId || typeof navigator === "undefined" || !navigator.geolocation) return;
+    setLiveSharing(true);
+    lastPushRef.current = Date.now();
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        const now = Date.now();
+        if (now - lastPushRef.current < LIVE_LOCATION_UPDATE_MS) return;
+        lastPushRef.current = now;
+        callEdge?.({
+          action: "location_update",
+          conversation_id: convId,
+          location: {
+            kind: "location",
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+            live: true,
+            updated_at: new Date().toISOString(),
+          },
+        }).catch(() => {});
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 },
+    );
+    liveStopRef.current = window.setTimeout(
+      () => { void stopLiveSharing(convId); },
+      LIVE_LOCATION_DURATION_MS,
+    );
+  }, [callEdge, shareLocation, stopLiveSharing]);
+
+  // Always release the geolocation watch when the page unmounts.
+  useEffect(() => () => {
+    if (watchIdRef.current != null && typeof navigator !== "undefined") {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+    }
+    if (liveStopRef.current != null) window.clearTimeout(liveStopRef.current);
+  }, []);
+
 
   const disabled = sending || !callEdge || !merchantId || !loggedIn;
   const notFound = storefront.data && !storefront.data.found;
@@ -416,6 +582,58 @@ function ChatPage() {
               {uploadErr}
             </div>
           )}
+          {locErr && (
+            <div className="mb-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {locErr}
+            </div>
+          )}
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              onClick={() => void shareLocation(false)}
+              disabled={disabled || locBusy || liveSharing}
+            >
+              {locBusy && !liveSharing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <MapPin className="h-4 w-4" />
+              )}
+              إرسال موقعي الحالي
+            </Button>
+            {liveSharing ? (
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                className="gap-1"
+                onClick={() => void stopLiveSharing()}
+              >
+                <Square className="h-4 w-4" />
+                إيقاف المشاركة الحية
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="gap-1"
+                onClick={() => void startLiveSharing()}
+                disabled={disabled || locBusy}
+              >
+                <Radio className="h-4 w-4" />
+                مشاركة الموقع الحي
+              </Button>
+            )}
+            {liveSharing && (
+              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
+                جاري تحديث موقعك تلقائياً
+              </span>
+            )}
+          </div>
           <div className="flex items-end gap-2">
             <input
               ref={fileInputRef}
@@ -484,7 +702,11 @@ function MessageBubble({
 }) {
   const isUser = role === "user";
   const theme = BUBBLE_THEME;
-  const media = (attachments ?? []).filter((a) => a && typeof a.url === "string");
+  const all = (attachments ?? []).filter((a) => a && typeof a.url === "string");
+  const locations = all.filter(
+    (a) => a.kind === "location" && typeof a.lat === "number" && typeof a.lng === "number",
+  ) as LocationAttachment[];
+  const media = all.filter((a) => a.kind !== "location");
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div className={`flex max-w-[85%] items-start gap-2 ${isUser ? "flex-row-reverse" : ""}`}>
@@ -510,6 +732,33 @@ function MessageBubble({
               ))}
             </div>
           )}
+          {locations.map((a, i) => {
+            const live = isLiveLocationActive(a);
+            return (
+              <a
+                key={`loc-${i}`}
+                href={mapsUrl(a.lat, a.lng)}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-2 rounded-xl border border-border/50 bg-background/60 px-3 py-2 text-foreground no-underline"
+              >
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-muted">
+                  {live ? (
+                    <Radio className="h-4 w-4 animate-pulse text-emerald-600" />
+                  ) : (
+                    <MapPin className="h-4 w-4" />
+                  )}
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-xs font-semibold">{formatLocationSummary(a)}</span>
+                  <span className="block text-[11px] text-muted-foreground">
+                    فتح في الخرائط
+                    {a.accuracy != null ? ` · دقة ±${a.accuracy}م` : ""}
+                  </span>
+                </span>
+              </a>
+            );
+          })}
           {content && <div>{content}</div>}
         </div>
       </div>
