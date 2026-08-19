@@ -341,6 +341,130 @@ function ChatPage() {
     }
   }
 
+  /** Sends one location message (one-shot or the opening point of a live share). */
+  const shareLocation = useCallback(
+    async (live: boolean) => {
+      if (!callEdge || !visitorId || !merchantId) return null;
+      setLocErr(null);
+      setLocBusy(true);
+      try {
+        const pos = await getCurrentPosition();
+        const now = new Date();
+        const attachment: LocationAttachment = {
+          kind: "location",
+          url: mapsUrl(pos.coords.latitude, pos.coords.longitude),
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy != null ? Math.round(pos.coords.accuracy) : null,
+          label: null,
+          live,
+          updated_at: now.toISOString(),
+          expires_at: live ? new Date(now.getTime() + LIVE_LOCATION_DURATION_MS).toISOString() : null,
+          source: "customer",
+        };
+        const text = live ? "بدأت مشاركة موقعي الحي معك." : "ده موقعي الحالي.";
+        setMessages((m) => [...m, {
+          role: "user",
+          content: text,
+          created_at: now.toISOString(),
+          attachments: [attachment as ChatAttachment],
+        }]);
+        const r = await callEdge({
+          action: "send",
+          conversation_id: conversationId ?? undefined,
+          merchant_id: merchantId,
+          visitor_id: visitorId,
+          message: text,
+          attachments: [attachment],
+        });
+        if (r.conversation_id && r.conversation_id !== conversationId) {
+          setConversationId(r.conversation_id);
+        }
+        if (r.messages) setMessages(r.messages);
+        setNeedsHuman(!!r.needs_human);
+        return r.conversation_id ?? conversationId;
+      } catch (e: any) {
+        setLocErr(e?.message || "تعذر مشاركة الموقع.");
+        return null;
+      } finally {
+        setLocBusy(false);
+      }
+    },
+    [callEdge, conversationId, merchantId, visitorId],
+  );
+
+  const stopLiveSharing = useCallback(
+    async (convId?: string | null) => {
+      if (watchIdRef.current != null && typeof navigator !== "undefined") {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+      if (liveStopRef.current != null) {
+        window.clearTimeout(liveStopRef.current);
+        liveStopRef.current = null;
+      }
+      setLiveSharing(false);
+      const id = convId ?? conversationId;
+      if (!callEdge || !id) return;
+      try {
+        const pos = await getCurrentPosition();
+        await callEdge({
+          action: "location_update",
+          conversation_id: id,
+          location: {
+            kind: "location",
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+            live: false,
+            updated_at: new Date().toISOString(),
+          },
+        });
+      } catch { /* stopping must never surface an error */ }
+    },
+    [callEdge, conversationId],
+  );
+
+  const startLiveSharing = useCallback(async () => {
+    const convId = await shareLocation(true);
+    if (!convId || typeof navigator === "undefined" || !navigator.geolocation) return;
+    setLiveSharing(true);
+    lastPushRef.current = Date.now();
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        const now = Date.now();
+        if (now - lastPushRef.current < LIVE_LOCATION_UPDATE_MS) return;
+        lastPushRef.current = now;
+        callEdge?.({
+          action: "location_update",
+          conversation_id: convId,
+          location: {
+            kind: "location",
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+            live: true,
+            updated_at: new Date().toISOString(),
+          },
+        }).catch(() => {});
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 },
+    );
+    liveStopRef.current = window.setTimeout(
+      () => { void stopLiveSharing(convId); },
+      LIVE_LOCATION_DURATION_MS,
+    );
+  }, [callEdge, shareLocation, stopLiveSharing]);
+
+  // Always release the geolocation watch when the page unmounts.
+  useEffect(() => () => {
+    if (watchIdRef.current != null && typeof navigator !== "undefined") {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+    }
+    if (liveStopRef.current != null) window.clearTimeout(liveStopRef.current);
+  }, []);
+
 
   const disabled = sending || !callEdge || !merchantId || !loggedIn;
   const notFound = storefront.data && !storefront.data.found;
