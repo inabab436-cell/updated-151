@@ -167,6 +167,14 @@ function ChatPage() {
   const [uploadErr, setUploadErr] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // ---- Live location sharing -------------------------------------------
+  const [locBusy, setLocBusy] = useState(false);
+  const [locErr, setLocErr] = useState<string | null>(null);
+  const [liveSharing, setLiveSharing] = useState(false);
+  const watchIdRef = useRef<number | null>(null);
+  const liveStopRef = useRef<number | null>(null);
+  const lastPushRef = useRef(0);
+
   const [initErr, setInitErr] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
