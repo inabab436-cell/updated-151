@@ -336,8 +336,9 @@ export const createStorefrontOrder = createServerFn({ method: "POST" })
     } catch { /* handled below */ }
     if (!customerId) return { ok: false, error: "login_required" };
 
-    // Every accepted order reserves stock atomically now. Manual methods remain
-    // payment-pending, but cannot leave sellable stock behind for another order.
+    // Manual payment method → NOTHING is deducted now. The order is stored as
+    // payment_status = 'pending' and stock is only taken when the merchant
+    // confirms the payment. Automatic methods deduct atomically right here.
     const { deductStock, paymentStatus, requiresPayment: isManual } = paymentDeductionPlan(chosenMethod?.behavior);
 
     let orderNumber = newOrderNumber();

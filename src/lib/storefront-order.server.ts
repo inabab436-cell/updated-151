@@ -92,9 +92,9 @@ export function buildOrderNotes(input: {
  * checkout and the chat agent so the two paths can never drift.
  *
  *  - automatic method → stock is verified AND deducted at order creation.
- *  - manual method    → stock is reserved immediately so another customer
- *    cannot buy it while payment is pending; only the payment state waits for
- *    the merchant's confirmation.
+ *  - manual method    → stock is verified but NOT deducted; the order is
+ *    stored as `pending` and the deduction happens only when the merchant
+ *    confirms the payment.
  */
 export function paymentDeductionPlan(behavior: string | null | undefined): {
   deductStock: boolean;
@@ -103,7 +103,7 @@ export function paymentDeductionPlan(behavior: string | null | undefined): {
 } {
   const manual = behavior === "manual";
   return {
-    deductStock: true,
+    deductStock: !manual,
     paymentStatus: manual ? "pending" : "confirmed",
     requiresPayment: manual,
   };
