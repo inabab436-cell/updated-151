@@ -82,9 +82,9 @@ describe("buildOrderNotes", () => {
 });
 
 describe("paymentDeductionPlan", () => {
-  it("manual payment never deducts stock at creation", () => {
+  it("manual payment reserves stock at creation while payment stays pending", () => {
     const plan = paymentDeductionPlan("manual");
-    expect(plan.deductStock).toBe(false);
+    expect(plan.deductStock).toBe(true);
     expect(plan.paymentStatus).toBe("pending");
     expect(plan.requiresPayment).toBe(true);
   });
