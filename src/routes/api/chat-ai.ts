@@ -2740,10 +2740,7 @@ export const Route = createFileRoute("/api/chat-ai")({
                     p_conversation_id: conversation_id,
                     p_merchant_id: merchant_id,
                     p_items: orderItemsToStore,
-                    p_stock_items:
-                      String(latestConversationOrder?.payment_status ?? "confirmed") === "pending"
-                        ? orderItemsToStore
-                        : cleanedItems,
+                    p_stock_items: cleanedItems,
                     p_notes: notes,
                     p_subtotal: pricing.subtotal,
                     p_discount: pricing.discount_total,
@@ -2761,8 +2758,8 @@ export const Route = createFileRoute("/api/chat-ai")({
                   p_merchant_id: merchant_id,
                   p_customer_id: customer?.id ?? null,
                   p_payment_method: chosenMethod?.name ?? rawPayment ?? null,
-                  // Manual payment → availability is verified but NOTHING is
-                  // deducted until the merchant confirms the payment.
+                  // Every accepted order reserves stock immediately. Manual
+                  // methods still remain payment-pending until confirmation.
                   p_deduct_stock: deductionPlan.deductStock,
                   p_payment_status: deductionPlan.paymentStatus,
                 });
